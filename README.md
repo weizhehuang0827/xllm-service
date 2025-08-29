@@ -35,6 +35,11 @@ xLLM-service targets to address key challenges in enterprise-level service scena
 ---
 
 ## 2. Key Features
+
+<div align="center">
+<img src="docs/assets/service_arch.png" alt="xLLM" style="width:80%; height:auto;">
+</div>
+
 With management of computing resource pools, intelligent scheduling and preemption of hybrid requests, and real-time monitoring of computing instances, xLLM-service achieves the following key features:
 
 - Unified scheduling of online and offline requests, with preemptive execution for online requests and best-effort execution for offline requests.
@@ -109,16 +114,24 @@ If you have problems about development, please check our document: * **[Document
 
 ## 6. Community & Support
 
-If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack.
+If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. Moreover, we have established a WeChat user group. You can find our group chat QR code image [here](https://qr.link/JZaROS) or visit the following live QR code. Welcome to contact us!
 
-Welcome to contact us:
 
 <div align="center">
-  <img src="" alt="contact" width="50%" height="50%">
+  <img src="docs/assets/wechat_qrcode1.png" alt="qrcode1" width="30%" />
+  <img src="docs/assets/wechat_qrcode2.png" alt="qrcode2" width="30%" />
 </div>
 
 ---
 ## 7. About the Contributors
+
+Thanks to the following collaborating university laboratories:
+
+- [THU-MIG](https://ise.thss.tsinghua.edu.cn/mig/projects.html) (School of Software, BNRist, Tsinghua University)
+- USTC-Cloudlab (Cloud Computing Lab, University of Science and Technology of China)
+- [Beihang-HiPO](https://github.com/buaa-hipo) (Beihang HiPO research group)
+- PKU-DS-LAB (Data Structure Laboratory, Peking University)
+- PKU-NetSys-LAB (NetSys Lab, Peking University)
 
 Thanks to all the following [developers](https://github.com/jd-opensource/xllm-service/graphs/contributors) who have contributed to xLLM.
 <a href="https://github.com/jd-opensource/xllm-service/graphs/contributors">

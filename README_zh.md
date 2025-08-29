@@ -30,9 +30,16 @@ xLLM-service 旨在解决企业级服务场景中的关键挑战：
 
 --- 
 
+
+
 ## 2. 核心特性
 
+<div align="center">
+<img src="docs/assets/service_arch.png" alt="xLLM" style="width:80%; height:auto;">
+</div>
+
 xLLM-service 通过对计算资源池的动态管理、请求的智能调度与抢占，以及计算实例的实时监控，实现了以下核心能力：
+
 - 在线与离线任务的统一调度，在线请求的抢占式执行，离线请求best-effort执行；
 - PD比例的自适应动态调配，支持实例PD角色的高效切换；
 - 多模态请求的EPD三阶段分离，不同阶段的资源智能分配；
@@ -99,17 +106,25 @@ cmake .. && make -j 8
 ## 6. 社区支持
 
 如果你在xLLM的开发或使用过程中遇到任何问题，欢迎在项目的Issue区域提交可复现的步骤或日志片段。
-如果您有企业内部Slack，请直接联系xLLM Core团队。
-
-欢迎沟通和联系我们:
+如果您有企业内部Slack，请直接联系xLLM Core团队。另外，我们建立了一个微信群，可以在[这里](https://qr.link/JZaROS)找到我们的群聊二维码图片或访问以下活码。欢迎沟通和联系我们:
 
 <div align="center">
-  <img src="xxx" alt="contact" width="50%" height="50%">
+  <img src="docs/assets/wechat_qrcode1.png" alt="qrcode1" width="30%" />
+  <img src="docs/assets/wechat_qrcode2.png" alt="qrcode2" width="30%" />
 </div>
 
 ---
 
 ## 7. 致谢
+
+感谢以下合作的高校实验室：
+
+- [THU-MIG](https://ise.thss.tsinghua.edu.cn/mig/projects.html)（清华大学软件学院、北京信息科学与技术国家研究中心）
+- USTC-Cloudlab（中国科学技术大学云计算实验室）
+- [Beihang-HiPO](https://github.com/buaa-hipo)（北京航空航天大学HiPO研究组）
+- PKU-DS-LAB（北京大学数据结构实验室）
+- PKU-NetSys-LAB（北京大学网络系统实验室）
+
 
 感谢以下为xLLM-Servic作出贡献的[开发者](https://github.com/jd-opensource/xllm-service/graphs/contributors)
 <a href="https://github.com/jd-opensource/xllm-service/graphs/contributors">
