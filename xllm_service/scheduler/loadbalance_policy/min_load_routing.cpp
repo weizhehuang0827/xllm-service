@@ -13,24 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-
-#include "common/macros.h"
-#include "loadbalance_policy.h"
+#include "min_load_routing.h"
 
 namespace xllm_service {
 
-class RoundRobin final : public LoadBalancePolicy {
- public:
-  RoundRobin(std::shared_ptr<InstanceMgr> instance_mgr, const Options& options)
-      : LoadBalancePolicy(instance_mgr, options) {};
-
-  virtual ~RoundRobin() = default;
-
-  bool select_instances_pair(std::shared_ptr<Request> request) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RoundRobin);
-};
+bool MinLoadRouting::select_instances_pair(std::shared_ptr<Request> request) {
+  bool find_decode = instance_mgr_->get_min_load_decode_instance(&request->routing);
+  bool find_prefill = instance_mgr_->get_min_load_prefill_instance(&request->routing);
+  return find_decode && find_prefill;
+}
 
 }  // namespace xllm_service

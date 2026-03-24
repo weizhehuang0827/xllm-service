@@ -18,13 +18,15 @@ limitations under the License.
 #include "common/types.h"
 #include "request/request.h"
 #include "scheduler/managers/instance_mgr.h"
+#include "common/options.h"
 
 namespace xllm_service {
 
 class LoadBalancePolicy {
  public:
-  LoadBalancePolicy(std::shared_ptr<InstanceMgr> instance_mgr)
-      : instance_mgr_(instance_mgr) {}
+  LoadBalancePolicy(std::shared_ptr<InstanceMgr> instance_mgr, const Options& options)
+      : instance_mgr_(instance_mgr), 
+        options_(options) {}
 
   virtual ~LoadBalancePolicy() = default;
 
@@ -32,6 +34,8 @@ class LoadBalancePolicy {
 
  protected:
   std::shared_ptr<InstanceMgr> instance_mgr_;
+
+  const Options& options_;
 };
 
 }  // namespace xllm_service

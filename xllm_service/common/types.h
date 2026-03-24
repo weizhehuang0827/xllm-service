@@ -183,6 +183,7 @@ struct InstanceMetaInfo {
   std::vector<std::pair<int32_t, double>> ttft_profiling_data;
   // tpot profiling data
   std::vector<std::tuple<int32_t, int32_t, double>> tpot_profiling_data;
+  std::vector<double> coefficients;
 
   // latest heatbeat timestamp
   uint64_t latest_timestamp = 0;
@@ -207,6 +208,7 @@ struct InstanceMetaInfo {
     json_val["ports"] = ports;
     json_val["ttft_profiling_data"] = ttft_profiling_data;
     json_val["tpot_profiling_data"] = tpot_profiling_data;
+    json_val["coefficients"] = coefficients;
     return json_val;
   }
 
@@ -248,6 +250,11 @@ struct InstanceMetaInfo {
           ttft_profiling_data.emplace_back(item[0], item[1]);
         }
       }
+      for (const auto& item :
+           json_value.at("coefficients").get<std::vector<double>>()) {
+        coefficients.push_back(item);
+      }
+
 
       for (const auto& item : json_value.at("tpot_profiling_data")) {
         if (item.is_array() && item.size() == 3) {

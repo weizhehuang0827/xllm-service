@@ -41,6 +41,7 @@ message InstanceMetaInfo {
   repeated string addrs = 8;
   repeated string device_ips = 9;
   repeated uint32 ports = 10;
+  repeated double coefficients = 11;
 }
 
 message KvCacheEvent {

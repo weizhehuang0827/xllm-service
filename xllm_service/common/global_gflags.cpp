@@ -110,3 +110,5 @@ DEFINE_int32(target_tpot,
              "Target Time Per Output Token (TPOT), in milliseconds.");
 
 BRPC_VALIDATE_GFLAG(target_tpot, brpc::NonNegativeInteger);
+
+DEFINE_string(priority_strategy, "fcfs", "priority strategy for requests");

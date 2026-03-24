@@ -20,6 +20,8 @@ limitations under the License.
 #include "loadbalance_policy/cache_aware_routing.h"
 #include "loadbalance_policy/round_robin.h"
 #include "loadbalance_policy/slo_aware_policy.h"
+#include "loadbalance_policy/priority_routing.h"
+#include "loadbalance_policy/min_load_routing.h"
 #include "tokenizer/tokenizer_factory.h"
 
 namespace {
@@ -65,11 +67,15 @@ Scheduler::Scheduler(const Options& options) : options_(options) {
 
   if (options.load_balance_policy() == "CAR") {
     lb_policy_ =
-        std::make_unique<CacheAwareRouting>(instance_mgr_, global_kvcache_mgr_);
+        std::make_unique<CacheAwareRouting>(instance_mgr_, global_kvcache_mgr_, options_);
   } else if (options.load_balance_policy() == "SLO_AWARE") {
-    lb_policy_ = std::make_unique<SloAwarePolicy>(options, instance_mgr_);
+    lb_policy_ = std::make_unique<SloAwarePolicy>(options, instance_mgr_, options_);
+  } else if (options.load_balance_policy() == "priority"){
+    lb_policy_ = std::make_unique<PriorityRouting>(instance_mgr_,options_);
+  } else if (options.load_balance_policy() == "min_load"){
+    lb_policy_ = std::make_unique<MinLoadRouting>(instance_mgr_,options_);
   } else {
-    lb_policy_ = std::make_unique<RoundRobin>(instance_mgr_);
+    lb_policy_ = std::make_unique<RoundRobin>(instance_mgr_,options_);
   }
 
   if (is_master_service_) {
@@ -111,7 +117,7 @@ bool Scheduler::schedule(std::shared_ptr<Request> request) {
   }
 
   auto ret = lb_policy_->select_instances_pair(request);
-  DLOG(INFO) << request->routing.debug_string();
+  LOG(INFO) << request->routing.debug_string();
 
   // update request metrics
   if (request->prompt.size() != 0) {
@@ -346,6 +352,18 @@ bool Scheduler::record_new_request(
     next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
   }
 
+  return true;
+}
+
+bool Scheduler::record_new_request(std::shared_ptr<Request> request){
+  std::lock_guard<std::mutex> guard(request_mutex_);
+  if (requests_.find(request->service_request_id) != requests_.end()) {
+    LOG(ERROR) << "The request ID already exists. Requests with the same ID "
+                  "are not allowed. "
+               << request->service_request_id;
+    return false;
+  }
+  requests_[request->service_request_id] = request;
   return true;
 }
 

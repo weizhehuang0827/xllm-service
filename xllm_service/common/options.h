@@ -74,6 +74,13 @@ class Options {
 
   // trace options
   PROPERTY(bool, enable_request_trace) = false;
+
+  PROPERTY(int32_t, max_global_tpot_ms) = 100;
+
+  PROPERTY(int32_t, max_global_ttft_ms) = 2000;
+
+  PROPERTY(std::string, priority_strategy) = "fcfs";
+
 };
 
 }  // namespace xllm_service

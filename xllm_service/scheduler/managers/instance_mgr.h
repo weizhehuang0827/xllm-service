@@ -76,6 +76,22 @@ class InstanceMgr final {
 
   void set_as_master();
 
+  bool get_min_load_decode_instance(Routing* routing);
+
+  bool get_min_load_prefill_instance(Routing* routing);
+
+  std::unordered_map<std::string, TtftPredictor> get_ttft_predictors();
+
+  std::unordered_map<std::string, absl::Time> get_prefill_instance_update_time_map();
+
+  std::unordered_map<std::string, std::vector<std::shared_ptr<Request>>> get_prefill_running_requests_map();
+
+  std::unordered_map<std::string, int32_t> get_decode_request_num_map();
+
+  double predict_step_time(std::shared_ptr<Request> request);
+
+  double get_constant_overhead(std::string instance_name);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(InstanceMgr);
 
@@ -161,6 +177,20 @@ class InstanceMgr final {
   // not own
   // NOTE: need to refactor with scheduler in future
   Scheduler* scheduler_;
+  std::atomic<size_t> satisfied_slo_request_num_{0};
+  std::atomic<size_t> total_request_num_{0};
+  std::atomic<size_t> prev_satisfied_slo_request_num_{0};
+  std::atomic<size_t> prev_actual_satisfied_slo_request_num_{0};
+  std::atomic<size_t> actual_satisfied_slo_request_num_{0};
+
+  // for defualt instance
+  std::unordered_map<std::string, int32_t> decode_request_num_map_;
+  std::shared_mutex update_map_mutex_;
+  std::unordered_map<std::string, absl::Time> update_time_map_;
+  using RunningRequestMap =
+      std::unordered_map<std::string, std::unordered_map<std::string, std::shared_ptr<Request>>>;
+  // currently only support prefill instance
+  RunningRequestMap running_requests_map_;
 
   ThreadPool threadpool_;
 };

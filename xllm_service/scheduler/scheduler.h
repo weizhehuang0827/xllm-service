@@ -60,6 +60,8 @@ class Scheduler final {
                           std::shared_ptr<Request> request);
   bool record_new_request(std::shared_ptr<CompletionCallData> call_data,
                           std::shared_ptr<Request> request);
+  bool record_new_request(std::shared_ptr<Request> request);
+
   void finish_request(const std::string& service_request_id,
                       bool error = false);
 

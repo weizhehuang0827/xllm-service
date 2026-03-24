@@ -20,8 +20,14 @@ limitations under the License.
 #include "chat_template/jinja_chat_template.h"
 #include "common/types.h"
 #include "common/xllm/output.h"
+#include <absl/time/clock.h>
+#include <absl/time/time.h>
 
 namespace xllm_service {
+
+enum class RequestPriority { DEFAULT = 0, HIGH = 1, NORMAL = 2, LOW = 3 };
+
+enum class Urgency { BUDGET = 3, URGENT = 2, TIMEOUT = 1, NORMAL = 0 };
 
 // Store request-related data
 struct Request {
@@ -68,6 +74,67 @@ struct Request {
 
   // latest token generate time
   absl::Time latest_generate_time;
+  int32_t ttft_slo_ms = 0;
+
+  int32_t tpot_slo_ms = 0;
+
+  int32_t tpot_priority_weight = 0;
+
+  int32_t ttft_priority_weight = 0;
+
+  int32_t ttlt_priority_weight = 0;
+
+  RequestPriority priority;
+
+  Urgency urgency = Urgency::NORMAL;
+
+  absl::Time created_time;
+
+  double estimated_latency = 0.0;
+
+  double exec_queue_time = 0.0;
+
+  int32_t elapsed_time_ms = 0;
+
+  bool can_satisfy_slo = false;
+
+  Request(): created_time(absl::Now()){}
+  
+  const absl::Time get_created_time() const { return created_time; }
+  const RequestPriority get_priority() const { return priority; }
+  const int32_t get_ttft_slo_ms() const { return ttft_slo_ms; }
+  const int32_t get_tpot_slo_ms() const { return tpot_slo_ms; }
+  const int32_t get_tpot_priority_weight() const { return tpot_priority_weight; }
+  const int32_t get_ttft_priority_weight() const { return ttft_priority_weight; }
+  const int32_t get_ttlt_priority_weight() const { return ttlt_priority_weight; }
+  void set_urgency(Urgency urgency_input) { urgency = urgency_input; }
+  Urgency get_urgency() const { return urgency; }
+  int32_t get_wait_time_ms() const {
+    return static_cast<int32_t>(absl::ToDoubleSeconds(absl::Now() - created_time) * 1000);
+  }
+  bool is_prefill_stage() const {return true;}
+
+  // only for prefill
+  int32_t get_deadline_ms() const {return ttft_slo_ms;}
+  // void set_deadline_ms(){;}
+  void set_elapsed_time_ms() {
+    elapsed_time_ms = static_cast<int32_t>(absl::ToDoubleSeconds(absl::Now() - created_time) * 1000);
+  }
+  int32_t get_elapsed_time_ms() const {return elapsed_time_ms;}
+
+  int32_t get_remaining_time() const{
+    return get_deadline_ms()-get_elapsed_time_ms();
+  }
+
+  void set_estimated_latency(double estimated_latency_input) {estimated_latency = estimated_latency_input;}
+
+  double get_estimated_latency() const { return estimated_latency; }
+
+  void set_exec_queue_time(double exec_queue_time_input) {exec_queue_time = exec_queue_time_input;}
+
+  double get_exec_queue_time() const { return exec_queue_time; }
 };
+
+
 
 }  // namespace xllm_service
