@@ -68,3 +68,5 @@ DECLARE_int32(target_ttft);
 DECLARE_int32(target_tpot);
 
 DECLARE_string(priority_strategy);
+
+DECLARE_bool(if_pd_disagg);

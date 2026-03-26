@@ -80,7 +80,7 @@ class InstanceMgr final {
 
   bool get_min_load_prefill_instance(Routing* routing);
 
-  std::unordered_map<std::string, TtftPredictor> get_ttft_predictors();
+  std::unordered_map<std::string, TtftPredictor> get_time_predictors();
 
   std::unordered_map<std::string, absl::Time> get_prefill_instance_update_time_map();
 

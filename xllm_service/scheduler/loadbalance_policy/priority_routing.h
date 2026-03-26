@@ -15,8 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include "common/global_gflags.h"
 #include "common/macros.h"
-#include "common/utils.h"
 #include "loadbalance_policy.h"
 #include <unordered_map>
 #include <vector>
@@ -32,7 +32,7 @@ class PriorityRouting final : public LoadBalancePolicy {
  public:
   PriorityRouting(std::shared_ptr<InstanceMgr> instance_mgr, const Options& options)
       : LoadBalancePolicy(instance_mgr, options) {
-        if_pd_disagg_ = utils::get_bool_env("ENABLE_DECODE_RESPONSE_TO_SERVICE", false);
+        if_pd_disagg_ = FLAGS_if_pd_disagg;
       }
 
   virtual ~PriorityRouting() = default;

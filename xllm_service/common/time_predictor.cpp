@@ -74,10 +74,24 @@ TimePredictor::TimePredictor(
   }
 }
 
-double TimePredictor::predict_ttft(int32_t length) {
+double TimePredictor::get_constant_overhead() {
+  double result = ttft_coefficients_(0);
+  if (result < 0) {
+    LOG(ERROR) << "Negative constant term: " << result;
+    result = 0.0;
+  }
+  return result;
+}
+
+double TimePredictor::predict_ttft(int32_t length,
+                                   bool if_need_add_constant_term) {
   double result = 0.0;
-  double power = 1.0;
-  for (int32_t i = 0; i < ttft_coefficients_.size(); ++i) {
+  if (if_need_add_constant_term && ttft_coefficients_.size() > 0) {
+    result = ttft_coefficients_(0);
+  }
+
+  double power = length;
+  for (int32_t i = 1; i < ttft_coefficients_.size(); ++i) {
     result += ttft_coefficients_(i) * power;
     power *= length;
   }
@@ -85,10 +99,22 @@ double TimePredictor::predict_ttft(int32_t length) {
   return result;
 }
 
-double TimePredictor::predict_tpot(int32_t total_length, int32_t batch_size) {
+double TimePredictor::predict_tpot(int32_t total_length,
+                                   int32_t batch_size,
+                                   bool if_need_add_constant_term) {
   double result = 0.0;
-  result = tpot_coefficients_(0) + tpot_coefficients_(1) * batch_size +
-           tpot_coefficients_(2) * total_length;
+  if (if_need_add_constant_term && tpot_coefficients_.size() > 0) {
+    result = tpot_coefficients_(0);
+  }
+
+  if (tpot_coefficients_.size() > 1) {
+    result += tpot_coefficients_(1) * batch_size;
+  }
+
+  if (tpot_coefficients_.size() > 2) {
+    result += tpot_coefficients_(2) * total_length;
+  }
+
   return result;
 }
 

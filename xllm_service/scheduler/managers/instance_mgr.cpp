@@ -438,10 +438,10 @@ std::unordered_map<std::string, absl::Time> InstanceMgr::get_prefill_instance_up
   return update_time_map_;
 }
 
-std::unordered_map<std::string, TtftPredictor> InstanceMgr::get_ttft_predictors() {
+std::unordered_map<std::string, TtftPredictor> InstanceMgr::get_time_predictors() {
   std::shared_lock<std::shared_mutex> lock(ttft_predictor_mutex_);
 
-  return ttft_predictors_;
+  return time_predictors_;
 }
 
 bool InstanceMgr::get_min_load_decode_instance(Routing* routing){
@@ -493,8 +493,8 @@ bool InstanceMgr::get_min_load_prefill_instance(Routing* routing){
 double InstanceMgr::predict_step_time(std::shared_ptr<Request> request) {
   std::shared_lock<std::shared_mutex> lock(ttft_predictor_mutex_);
 
-  auto it = ttft_predictors_.find(request->routing.prefill_name);
-  if (it == ttft_predictors_.end()) {
+  auto it = time_predictors_.find(request->routing.prefill_name);
+  if (it == time_predictors_.end()) {
     LOG(ERROR) << "Failed to find instance ttft predictor, instance name : "
                << request->routing.prefill_name;
     return 0.0;
@@ -506,8 +506,8 @@ double InstanceMgr::predict_step_time(std::shared_ptr<Request> request) {
 double InstanceMgr::get_constant_overhead(std::string instance_name) {
   std::shared_lock<std::shared_mutex> lock(ttft_predictor_mutex_);
 
-  auto it = ttft_predictors_.find(instance_name);
-  if (it == ttft_predictors_.end()) {
+  auto it = time_predictors_.find(instance_name);
+  if (it == time_predictors_.end()) {
     LOG(ERROR) << "Failed to find instance ttft predictor, instance name : "
                << instance_name;
     return 0.0;

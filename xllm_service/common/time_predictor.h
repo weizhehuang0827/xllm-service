@@ -28,9 +28,14 @@ class TimePredictor final {
           tpot_profiling_data);
   ~TimePredictor() = default;
 
-  double predict_ttft(int32_t length);
+  double predict_ttft(int32_t length,
+                      bool if_need_add_constant_term = true);
 
-  double predict_tpot(int32_t total_length, int32_t batch_size);
+  double predict_tpot(int32_t total_length,
+                      int32_t batch_size,
+                      bool if_need_add_constant_term = true);
+
+  double get_constant_overhead();
 
  private:
   Eigen::VectorXd ttft_coefficients_;

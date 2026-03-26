@@ -112,3 +112,7 @@ DEFINE_int32(target_tpot,
 BRPC_VALIDATE_GFLAG(target_tpot, brpc::NonNegativeInteger);
 
 DEFINE_string(priority_strategy, "fcfs", "priority strategy for requests");
+
+DEFINE_bool(if_pd_disagg,
+            false,
+            "Whether to enable pd disaggregation in priority routing.");

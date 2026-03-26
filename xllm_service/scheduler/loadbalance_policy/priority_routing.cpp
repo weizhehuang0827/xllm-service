@@ -24,7 +24,7 @@ limitations under the License.
 
 namespace xllm_service {
 
-double PriorityRouting::get_latency_budget_and_request_order(TtftPredictor& ttft_predictor, std::vector<std::shared_ptr<Request>>& running_queue){
+double PriorityRouting::get_latency_budget_and_request_order(TimePredictor& ttft_predictor, std::vector<std::shared_ptr<Request>>& running_queue){
   
   double latency_budget = 0;
   for (auto& request : running_queue){
@@ -150,7 +150,7 @@ double PriorityRouting::get_estimate_exec_time(bool is_pre, double executed_time
 
 int32_t PriorityRouting::get_gain_for_running_queue(bool is_pre, std::vector<std::shared_ptr<Request>>& running_queue, double latency_budget, double constant_overhead, double executed_time, double total_exec_time){
   int32_t gain = 0;
-  double alpha = is_pre? 1:0.8;
+  double alpha = 0.9;
   if (if_pd_disagg_){
     if (options_.priority_strategy() == "fcfs1" || options_.priority_strategy() == "fcfs"){
       // constrain seq = 1
@@ -223,9 +223,9 @@ int32_t PriorityRouting::get_gain_for_running_queue(bool is_pre, std::vector<std
 }
 
 
-std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::string, int32_t>& decode_request_num_map, std::unordered_map<std::string, absl::Time>& update_time_map, std::unordered_map<std::string, TtftPredictor>& ttft_predictors, RunningRequestMap& prefill_running_requests_map,std::unordered_map<std::string,std::string>& strategies,std::unordered_map<std::string,double>& budgets, std::shared_ptr<Request> request){
-  double up_ratio = 0.9;
-  double low_ratio = 0.1;
+std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::string, int32_t>& decode_request_num_map, std::unordered_map<std::string, absl::Time>& update_time_map, std::unordered_map<std::string, TimePredictor>& time_predictors, RunningRequestMap& prefill_running_requests_map,std::unordered_map<std::string,std::string>& strategies,std::unordered_map<std::string,double>& budgets, std::shared_ptr<Request> request){
+  double up_ratio = 0.8;
+  double low_ratio = 0.2;
   int32_t ttft_slo = request->get_ttft_slo_ms();
   double max_delta_gain = std::numeric_limits<double>::lowest();
   std::string max_gain_instance = "";
@@ -248,8 +248,8 @@ std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::strin
     }
     auto latency_budget = budget_it->second;
 
-    auto it = ttft_predictors.find(pair.first);
-    if (it == ttft_predictors.end()) {
+    auto it = time_predictors.find(pair.first);
+    if (it == time_predictors.end()) {
       LOG(ERROR) << "Failed to find instance ttft predictor, instance name : "
                  << pair.first;
       continue;
@@ -276,13 +276,13 @@ std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::strin
     int32_t decode_request_num = decode_num_it->second;
     double constant_overhead = ttft_predictor.get_constant_overhead();
     if (!if_pd_disagg_){
-      constant_overhead += ttft_predictor.predict_step_time(decode_request_num, false); // only for disagg_
+      constant_overhead += ttft_predictor.predict_tpot(0, decode_request_num, false); // only for disagg_
     }
 
     instances_name.push_back(pair.first);
 
     // 计算当前这个request的指标
-    request->set_estimated_latency(ttft_predictor.predict_step_time(request->token_ids.size(), false));
+    request->set_estimated_latency(ttft_predictor.predict_ttft(request->token_ids.size(), false));
     request->set_elapsed_time_ms();
     // if (request->get_remaining_time()< total_exec_time*latency_budget / (latency_budget - constant_overhead)){
     //   request->set_urgency(Urgency::URGENT); //下一个回合就超时的，所以尽量这回合就加进去
@@ -425,11 +425,11 @@ bool PriorityRouting::select_instances_pair(std::shared_ptr<Request> request) {
   RunningRequestMap prefill_running_requests_map;
   std::unordered_map<std::string, absl::Time> update_time_map;
   std::unordered_map<std::string, int32_t> decode_request_num_map;
-  std::unordered_map<std::string, TtftPredictor> ttft_predictors;
+  std::unordered_map<std::string, TimePredictor> time_predictors;
   prefill_running_requests_map = instance_mgr_->get_prefill_running_requests_map();
   update_time_map = instance_mgr_->get_prefill_instance_update_time_map();
   decode_request_num_map = instance_mgr_->get_decode_request_num_map();
-  ttft_predictors = instance_mgr_->get_ttft_predictors();
+  time_predictors = instance_mgr_->get_time_predictors();
   if (prefill_running_requests_map.empty()){
     LOG(ERROR) << "No prefill instance found!";
     return false;
@@ -439,8 +439,8 @@ bool PriorityRouting::select_instances_pair(std::shared_ptr<Request> request) {
   std::unordered_map<std::string,std::string> strategies;
   std::unordered_map<std::string,double> budgets;
   for (auto& pair : prefill_running_requests_map) {
-    auto it = ttft_predictors.find(pair.first);
-    if (it == ttft_predictors.end()) {
+    auto it = time_predictors.find(pair.first);
+    if (it == time_predictors.end()) {
       LOG(ERROR) << "Failed to find instance ttft predictor, instance name : "
                  << pair.first;
       continue;
@@ -449,7 +449,7 @@ bool PriorityRouting::select_instances_pair(std::shared_ptr<Request> request) {
     budgets.emplace(pair.first, get_latency_budget_and_request_order(it->second, pair.second));
   }
 
-  auto max_prefill_gain_instance = get_max_gain_instance(decode_request_num_map, update_time_map, ttft_predictors, prefill_running_requests_map, strategies, budgets, request);
+  auto max_prefill_gain_instance = get_max_gain_instance(decode_request_num_map, update_time_map, time_predictors, prefill_running_requests_map, strategies, budgets, request);
   request->routing.prefill_name = max_prefill_gain_instance;
   return instance_mgr_->get_min_load_decode_instance(&request->routing);
 

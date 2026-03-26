@@ -486,7 +486,7 @@ void Scheduler::update_request_metrics(std::shared_ptr<Request> request,
                                           RequestAction::FINISH_PREFILL);
   } else {
     // update instance request metrics
-    instance_mgr_->update_request_metrics(request, RequestAction::GENERATE);
+    // instance_mgr_->update_request_metrics(request, RequestAction::GENERATE);
   }
 }
 
