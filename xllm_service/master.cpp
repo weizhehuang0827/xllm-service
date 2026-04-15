@@ -195,7 +195,11 @@ int main(int argc, char* argv[]) {
       .enable_request_trace(FLAGS_enable_request_trace)
       .block_size(FLAGS_block_size)
       .tokenizer_path(FLAGS_tokenizer_path)
-      .priority_strategy(FLAGS_priority_strategy);
+      .priority_strategy(FLAGS_priority_strategy)
+      .priority_disagg_prefill_bucket_sizes(
+          FLAGS_priority_disagg_prefill_bucket_sizes)
+      .priority_disagg_decode_bucket_sizes(
+          FLAGS_priority_disagg_decode_bucket_sizes);
 
   xllm_service::Master master(options);
 

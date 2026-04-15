@@ -7,14 +7,16 @@ cc_library(
     loadbalance_policy
   HDRS
     min_load_routing.h
-    priority_routing.h
+    go_routing.h
+    priority_disagg_routing.h
     loadbalance_policy.h
     round_robin.h
     cache_aware_routing.h
     slo_aware_policy.h
   SRCS
     min_load_routing.cpp
-    priority_routing.cpp
+    go_routing.cpp
+    priority_disagg_routing.cpp
     round_robin.cpp
     cache_aware_routing.cpp
     slo_aware_policy.cpp

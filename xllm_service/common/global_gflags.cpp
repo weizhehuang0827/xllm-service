@@ -112,6 +112,16 @@ DEFINE_int32(target_tpot,
 BRPC_VALIDATE_GFLAG(target_tpot, brpc::NonNegativeInteger);
 
 DEFINE_string(priority_strategy, "fcfs", "priority strategy for requests");
+DEFINE_string(priority_disagg_prefill_bucket_sizes,
+              "",
+              "Comma-separated bucket sizes for priority_disagg prefill "
+              "instances in HIGH,NORMAL,LOW order, e.g. 2,3,1. Empty means "
+              "even split.");
+DEFINE_string(priority_disagg_decode_bucket_sizes,
+              "",
+              "Comma-separated bucket sizes for priority_disagg decode "
+              "instances in HIGH,NORMAL,LOW order, e.g. 1,2,1. Empty means "
+              "even split.");
 
 DEFINE_bool(if_pd_disagg,
             false,

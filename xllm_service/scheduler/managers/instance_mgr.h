@@ -48,6 +48,8 @@ class InstanceMgr final {
   InstanceMetaInfo get_instance_info(const std::string& instance_name);
 
   bool get_next_instance_pair(Routing* routing);
+  bool get_priority_disagg_instance_pair(Routing* routing,
+                                         RequestPriority priority);
 
   std::vector<std::string> get_static_decode_list(
       const std::string& instance_name);
@@ -80,7 +82,7 @@ class InstanceMgr final {
 
   bool get_min_load_prefill_instance(Routing* routing);
 
-  std::unordered_map<std::string, TtftPredictor> get_time_predictors();
+  std::unordered_map<std::string, TimePredictor> get_time_predictors();
 
   std::unordered_map<std::string, absl::Time> get_prefill_instance_update_time_map();
 
@@ -88,7 +90,7 @@ class InstanceMgr final {
 
   std::unordered_map<std::string, int32_t> get_decode_request_num_map();
 
-  double predict_step_time(std::shared_ptr<Request> request);
+//   double predict_step_time(std::shared_ptr<Request> request);
 
   double get_constant_overhead(std::string instance_name);
 
@@ -149,6 +151,8 @@ class InstanceMgr final {
   std::vector<std::string> decode_index_;
   uint64_t next_prefill_index_ = 0;
   uint64_t next_decode_index_ = 0;
+  uint64_t next_prefill_priority_index_[3] = {0, 0, 0};
+  uint64_t next_decode_priority_index_[3] = {0, 0, 0};
 
   std::shared_mutex load_metric_mutex_;
   std::unordered_map<std::string, LoadMetrics> load_metrics_;
@@ -160,7 +164,7 @@ class InstanceMgr final {
   std::unordered_set<std::string> removed_instance_;
 
   // "instance name" -> "TimePredictor" map
-  std::mutex time_predictor_mutex_;
+  std::shared_mutex time_predictor_mutex_;
   std::unordered_map<std::string, TimePredictor> time_predictors_;
 
   // Record the latest token latency metrics for each instance, including TTFT
@@ -171,7 +175,7 @@ class InstanceMgr final {
   // Record the request metrics for each instance, including prefill token
   // count, prefill request count, estimated prefill execution time, decode
   // token count, and decode request count.
-  std::mutex request_metrics_mutex_;
+  std::shared_mutex request_metrics_mutex_;
   std::unordered_map<std::string, RequestMetrics> request_metrics_;
 
   // not own
@@ -189,7 +193,7 @@ class InstanceMgr final {
   std::unordered_map<std::string, absl::Time> update_time_map_;
   using RunningRequestMap =
       std::unordered_map<std::string, std::unordered_map<std::string, std::shared_ptr<Request>>>;
-  // currently only support prefill instance
+  // only maintain running requests for prefill/default instances
   RunningRequestMap running_requests_map_;
 
   ThreadPool threadpool_;

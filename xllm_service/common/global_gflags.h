@@ -68,5 +68,7 @@ DECLARE_int32(target_ttft);
 DECLARE_int32(target_tpot);
 
 DECLARE_string(priority_strategy);
+DECLARE_string(priority_disagg_prefill_bucket_sizes);
+DECLARE_string(priority_disagg_decode_bucket_sizes);
 
 DECLARE_bool(if_pd_disagg);

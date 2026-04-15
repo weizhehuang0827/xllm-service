@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "loadbalance_policy.h"
+#include <mutex>
 
 namespace xllm_service {
 
@@ -31,6 +32,8 @@ class MinLoadRouting final : public LoadBalancePolicy {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MinLoadRouting);
+
+  std::mutex select_instances_mutex_;
 };
 
 }  // namespace xllm_service

@@ -16,6 +16,8 @@ limitations under the License.
 #pragma once
 
 #include <Eigen/Dense>
+#include <tuple>
+#include <vector>
 
 namespace xllm_service {
 
@@ -25,7 +27,8 @@ class TimePredictor final {
   TimePredictor(
       const std::vector<std::pair<int32_t, double>>& ttft_profiling_data,
       const std::vector<std::tuple<int32_t, int32_t, double>>&
-          tpot_profiling_data);
+          tpot_profiling_data,
+      const std::vector<double>& coefficients = {});
   ~TimePredictor() = default;
 
   double predict_ttft(int32_t length,
@@ -35,11 +38,17 @@ class TimePredictor final {
                       int32_t batch_size,
                       bool if_need_add_constant_term = true);
 
+  double predict_step_time(int32_t length,
+                           int32_t prefix_length = 0,
+                           bool if_need_add_constant_term = true);
+  double predict_decode_term(int32_t decode_request_num);
+
   double get_constant_overhead();
 
  private:
   Eigen::VectorXd ttft_coefficients_;
   Eigen::VectorXd tpot_coefficients_;
+  Eigen::VectorXd general_coefficient_;
 };
 
 }  // namespace xllm_service

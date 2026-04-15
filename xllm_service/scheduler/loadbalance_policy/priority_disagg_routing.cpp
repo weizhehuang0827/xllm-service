@@ -13,15 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "min_load_routing.h"
+#include "priority_disagg_routing.h"
 
 namespace xllm_service {
 
-bool MinLoadRouting::select_instances_pair(std::shared_ptr<Request> request) {
-  std::lock_guard<std::mutex> lock(select_instances_mutex_);
-  bool find_decode = instance_mgr_->get_min_load_decode_instance(&request->routing);
-  bool find_prefill = instance_mgr_->get_min_load_prefill_instance(&request->routing);
-  return find_decode && find_prefill;
+bool PriorityDisaggRouting::select_instances_pair(std::shared_ptr<Request> request) {
+  return instance_mgr_->get_priority_disagg_instance_pair(&request->routing,
+                                                          request->get_priority());
 }
 
 }  // namespace xllm_service

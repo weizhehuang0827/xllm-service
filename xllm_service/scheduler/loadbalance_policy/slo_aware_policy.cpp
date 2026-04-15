@@ -21,7 +21,7 @@ namespace xllm_service {
 
 SloAwarePolicy::SloAwarePolicy(const Options& options,
                                std::shared_ptr<InstanceMgr> instance_mgr)
-    : options_(options), LoadBalancePolicy(instance_mgr) {}
+    : LoadBalancePolicy(instance_mgr, options), options_(options) {}
 
 bool SloAwarePolicy::select_instances_pair(std::shared_ptr<Request> request) {
   if (request->token_ids.empty()) {

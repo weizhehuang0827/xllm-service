@@ -20,7 +20,8 @@ limitations under the License.
 #include "loadbalance_policy/cache_aware_routing.h"
 #include "loadbalance_policy/round_robin.h"
 #include "loadbalance_policy/slo_aware_policy.h"
-#include "loadbalance_policy/priority_routing.h"
+#include "loadbalance_policy/go_routing.h"
+#include "loadbalance_policy/priority_disagg_routing.h"
 #include "loadbalance_policy/min_load_routing.h"
 #include "tokenizer/tokenizer_factory.h"
 
@@ -69,9 +70,11 @@ Scheduler::Scheduler(const Options& options) : options_(options) {
     lb_policy_ =
         std::make_unique<CacheAwareRouting>(instance_mgr_, global_kvcache_mgr_, options_);
   } else if (options.load_balance_policy() == "SLO_AWARE") {
-    lb_policy_ = std::make_unique<SloAwarePolicy>(options, instance_mgr_, options_);
-  } else if (options.load_balance_policy() == "priority"){
-    lb_policy_ = std::make_unique<PriorityRouting>(instance_mgr_,options_);
+    lb_policy_ = std::make_unique<SloAwarePolicy>(options_, instance_mgr_);
+  } else if (options.load_balance_policy() == "gorouting"){
+    lb_policy_ = std::make_unique<GoRouting>(instance_mgr_,options_);
+  } else if (options.load_balance_policy() == "priority_disagg") {
+    lb_policy_ = std::make_unique<PriorityDisaggRouting>(instance_mgr_, options_);
   } else if (options.load_balance_policy() == "min_load"){
     lb_policy_ = std::make_unique<MinLoadRouting>(instance_mgr_,options_);
   } else {
@@ -93,6 +96,8 @@ Scheduler::Scheduler(const Options& options) : options_(options) {
 Scheduler::~Scheduler() { etcd_client_->stop_watch(); }
 
 bool Scheduler::schedule(std::shared_ptr<Request> request) {
+  std::lock_guard<std::mutex> guard(schedule_mutex_);
+
   // apply chat template
   if (request->messages.size() > 0) {
     if (chat_template_ == nullptr) {
@@ -117,6 +122,12 @@ bool Scheduler::schedule(std::shared_ptr<Request> request) {
   }
 
   auto ret = lb_policy_->select_instances_pair(request);
+  if (!ret) {
+    LOG(ERROR) << "Failed to select instances pair for request: "
+               << request->service_request_id;
+    return false;
+  }
+
   LOG(INFO) << request->routing.debug_string();
 
   // update request metrics
@@ -124,7 +135,7 @@ bool Scheduler::schedule(std::shared_ptr<Request> request) {
     instance_mgr_->update_request_metrics(request, RequestAction::SCHEDULE);
   }
 
-  return ret;
+  return true;
 }
 
 std::shared_ptr<brpc::Channel> Scheduler::get_channel(
@@ -311,7 +322,6 @@ bool Scheduler::record_new_request(
                  << request->service_request_id;
       return false;
     }
-
     request->latest_generate_time = absl::Now();
 
     request->output_callback =
@@ -417,14 +427,31 @@ void Scheduler::clear_requests_on_failed_instance(
   }
 }
 
+void Scheduler::update_request_metrics_for_prefill(
+    const std::string& service_request_id) {
+  std::lock_guard<std::mutex> guard(request_mutex_);
+  auto it = requests_.find(service_request_id);
+  if (it == requests_.end()) {
+    LOG(WARNING)
+        << "Can not found request when updating prefill metrics, request id: "
+        << service_request_id;
+    return;
+  }
+
+  if (it->second->prefill_stage_finished) {
+    return;
+  }
+
+  update_request_metrics(it->second, /*finished_on_prefill_instance=*/true);
+}
+
 bool Scheduler::handle_generation(const llm::RequestOutput& request_output) {
-  bool finished_on_prefill_instance =
-      request_output.finished_on_prefill_instance;
   const std::string& service_request_id = request_output.service_request_id;
   bool status_error =
       request_output.status.has_value() && !request_output.status.value().ok();
 
   OutputCallback cb;
+  std::shared_ptr<Request> request;
   {
     std::lock_guard<std::mutex> guard(request_mutex_);
     auto it = requests_.find(service_request_id);
@@ -435,13 +462,15 @@ bool Scheduler::handle_generation(const llm::RequestOutput& request_output) {
       return false;
     }
     cb = it->second->output_callback;
-    auto& request = it->second;
+    request = it->second;
 
-    if (!status_error) {
-      // no error, update instance request metrics
-      update_request_metrics(request, finished_on_prefill_instance);
-      update_token_latency_metrics(request, finished_on_prefill_instance);
-    }
+  }
+  bool prefill_just_finished = false;
+  if (!status_error) {
+    prefill_just_finished = !request->prefill_stage_finished;
+    // no error, update instance request metrics
+    update_request_metrics(request, prefill_just_finished);
+    update_token_latency_metrics(request, prefill_just_finished);
   }
 
   size_t req_thread_idx = -1;
@@ -463,7 +492,8 @@ bool Scheduler::handle_generation(const llm::RequestOutput& request_output) {
        cb,
        status_error,
        request_output = std::move(request_output)]() mutable {
-        if (!cb(request_output) || status_error) {
+        const bool cb_ok = cb(request_output);
+        if (!cb_ok || status_error) {
           finish_request(service_request_id, true);
           return;
         }
@@ -484,9 +514,6 @@ void Scheduler::update_request_metrics(std::shared_ptr<Request> request,
     // update instance request metrics for prefill finished request
     instance_mgr_->update_request_metrics(request,
                                           RequestAction::FINISH_PREFILL);
-  } else {
-    // update instance request metrics
-    // instance_mgr_->update_request_metrics(request, RequestAction::GENERATE);
   }
 }
 

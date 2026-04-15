@@ -79,17 +79,6 @@ void XllmHttpServiceImpl::Hello(::google::protobuf::RpcController* controller,
 }
 
 namespace {
-template <typename T>
-void handle_non_stream_response(brpc::Controller* cntl,
-                                std::shared_ptr<T> call_data) {
-  std::unique_ptr<brpc::Controller> cntl_guard(cntl);
-  if (cntl->Failed()) {
-    call_data->finish_with_error(cntl->ErrorText());
-    LOG(ERROR) << "Fail to send stream generation, " << cntl->ErrorText();
-    return;
-  }
-  call_data->write_and_finish(cntl->response_attachment().to_string());
-}
 
 // fire and forget
 template <typename T>
@@ -106,52 +95,6 @@ void handle_first_send_request(brpc::Controller* cntl,
     return;
   }
 }
-
-template <typename T>
-class CustomProgressiveReader : public brpc::ProgressiveReader {
- public:
-  explicit CustomProgressiveReader(brpc::Controller* redirect_cntl,
-                                   std::shared_ptr<T> call_data,
-                                   Scheduler* scheduler,
-                                   std::string service_request_id,
-                                   bool enable_decode_response_to_service)
-      : redirect_cntl_(redirect_cntl), 
-        call_data_(call_data),
-        scheduler_(scheduler),
-        service_request_id_(service_request_id),
-        enable_decode_response_to_service_(enable_decode_response_to_service),
-        is_first_part_(true) {}
-
-  virtual ~CustomProgressiveReader() { delete redirect_cntl_; }
-
-  virtual butil::Status OnReadOnePart(const void* data, size_t length) {
-    // 如果是第一个数据块且启用了服务模式，更新prefill指标
-    if (is_first_part_ && !enable_decode_response_to_service_) {
-      scheduler_->update_request_metrics_for_prefill(service_request_id_);
-      is_first_part_ = false;
-    }
-    
-    call_data_->write(std::string((char*)data, length));
-    return butil::Status::OK();
-  }
-
-  virtual void OnEndOfMessage(const butil::Status& status) { 
-    // 如果没有收到任何数据但请求完成，也需要更新指标
-    // if (is_first_part_ && !enable_decode_response_to_service_) {
-    //   scheduler_->update_request_metrics_for_prefill(service_request_id_);
-    // }
-    scheduler_->finish_request(service_request_id_, status.ok()==false);
-    delete this; 
-  }
-
- private:
-  brpc::Controller* redirect_cntl_ = nullptr;
-  std::shared_ptr<T> call_data_;
-  Scheduler* scheduler_;
-  std::string service_request_id_;
-  bool enable_decode_response_to_service_;
-  bool is_first_part_;
-};
 
 }  // namespace
 
@@ -189,15 +132,6 @@ void XllmHttpServiceImpl::handle(std::shared_ptr<T> call_data,
                << request->service_request_id;
     call_data->finish_with_error("Internal runtime error.");
     return;
-  }
-  else{
-    bool success = scheduler_->record_new_request(request);
-    if (!success) {
-      LOG(ERROR) << "rpc service add new request error: "
-                 << request->service_request_id;
-      call_data->finish_with_error("Internal runtime error.");
-      return;
-    }
   }
 
   // async redistribute the request and wait the response
@@ -252,6 +186,9 @@ std::shared_ptr<Request> XllmHttpServiceImpl::generate_request(
   }
   if (req_pb->has_ttlt_priority_weight()) {
     request->ttlt_priority_weight = req_pb->ttlt_priority_weight();
+  }
+  if (req_pb->has_priority()) {
+    request->priority = static_cast<RequestPriority>(req_pb->priority());
   }
 
 

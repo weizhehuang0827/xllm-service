@@ -75,6 +75,10 @@ class Scheduler final {
   void update_request_metrics(std::shared_ptr<Request> request,
                               bool finished_on_prefill_instance);
 
+  // update request metrics when first prefill token is returned by http proxy
+  void update_request_metrics_for_prefill(
+      const std::string& service_request_id);
+
   // update token latency metrics
   void update_token_latency_metrics(std::shared_ptr<Request> request,
                                     bool finished_on_prefill_instance);
@@ -133,6 +137,9 @@ class Scheduler final {
 
   // used when receive token from decode instance.
   ResponseHandler response_handler_;
+
+  // Serialize scheduling to avoid concurrent instance selection races.
+  std::mutex schedule_mutex_;
 };
 
 }  // namespace xllm_service

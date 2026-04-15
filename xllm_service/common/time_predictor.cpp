@@ -14,9 +14,24 @@ limitations under the License.
 ==============================================================================*/
 
 #include "time_predictor.h"
+#include <glog/logging.h>
+#include <sstream>
 
 namespace {
 constexpr int32_t kDegree = 2;
+
+std::string EigenVectorToString(const Eigen::VectorXd& vec) {
+  std::ostringstream oss;
+  oss << "[";
+  for (int32_t i = 0; i < vec.size(); ++i) {
+    if (i > 0) {
+      oss << ", ";
+    }
+    oss << vec(i);
+  }
+  oss << "]";
+  return oss.str();
+}
 }  // namespace
 
 namespace xllm_service {
@@ -24,7 +39,8 @@ namespace xllm_service {
 TimePredictor::TimePredictor(
     const std::vector<std::pair<int32_t, double>>& ttft_profiling_data,
     const std::vector<std::tuple<int32_t, int32_t, double>>&
-        tpot_profiling_data) {
+        tpot_profiling_data,
+    const std::vector<double>& coefficients) {
   if (!ttft_profiling_data.empty()) {
     // construct Vandermonde matrix
     int32_t m = ttft_profiling_data.size();
@@ -70,12 +86,34 @@ TimePredictor::TimePredictor(
     // get coefficients
     tpot_coefficients_ = matrix.colPivHouseholderQr().solve(target);
   } else {
-    ttft_coefficients_ = Eigen::VectorXd::Zero(3);
+    tpot_coefficients_ = Eigen::VectorXd::Zero(3);
   }
+
+  if (!coefficients.empty()) {
+    general_coefficient_ = Eigen::VectorXd::Zero(coefficients.size());
+    for (size_t i = 0; i < coefficients.size(); ++i) {
+      general_coefficient_(i) = coefficients[i];
+    }
+  } else if (ttft_coefficients_.size() > 0) {
+    general_coefficient_ = ttft_coefficients_;
+  } else {
+    general_coefficient_ = Eigen::VectorXd::Zero(0);
+  }
+
+  LOG(INFO) << "TimePredictor initialized. input_coefficients_size="
+            << coefficients.size()
+            << ", general_coefficient=" << EigenVectorToString(general_coefficient_)
+            << ", ttft_coefficients=" << EigenVectorToString(ttft_coefficients_)
+            << ", tpot_coefficients=" << EigenVectorToString(tpot_coefficients_);
 }
 
 double TimePredictor::get_constant_overhead() {
-  double result = ttft_coefficients_(0);
+  double result = 0.0;
+  if (general_coefficient_.size() > 0) {
+    result = general_coefficient_(0);
+  } else if (ttft_coefficients_.size() > 0) {
+    result = ttft_coefficients_(0);
+  }
   if (result < 0) {
     LOG(ERROR) << "Negative constant term: " << result;
     result = 0.0;
@@ -115,6 +153,71 @@ double TimePredictor::predict_tpot(int32_t total_length,
     result += tpot_coefficients_(2) * total_length;
   }
 
+  return result;
+}
+
+double TimePredictor::predict_step_time(int32_t length,
+                                        int32_t prefix_length,
+                                        bool if_need_add_constant_term) {
+  if (general_coefficient_.size() == 0) {
+    if (prefix_length > 0) {
+      return predict_tpot(length, prefix_length, if_need_add_constant_term);
+    }
+    return predict_ttft(length, if_need_add_constant_term);
+  }
+
+  // Compat path: keep old decode-style invocation
+  // (length=0, prefix_length=batch_size) working after API switch.
+  int32_t effective_length = length;
+  int32_t effective_prefix_length = prefix_length;
+  if (length <= 0 && prefix_length > 0) {
+    effective_length = prefix_length;
+    effective_prefix_length = 0;
+  }
+
+  double result = 0.0;
+  if (if_need_add_constant_term && general_coefficient_.size() > 0) {
+    result = general_coefficient_(0);
+  }
+
+  if (general_coefficient_.size() >= 5) {
+    int32_t diff = effective_length - effective_prefix_length;
+    result += (general_coefficient_(1) * diff * diff +
+               general_coefficient_(2) * diff +
+               general_coefficient_(3) * diff * effective_prefix_length +
+               general_coefficient_(4) * effective_prefix_length);
+  } else {
+    int32_t effective_token_length = effective_length - effective_prefix_length;
+    double power = effective_token_length;
+    for (int32_t i = 1; i < general_coefficient_.size(); ++i) {
+      result += general_coefficient_(i) * power;
+      power *= effective_token_length;
+    }
+  }
+
+  if (result < 0) {
+    LOG(ERROR) << "Negative step time prediction: " << result
+               << ". Input param: length:" << length
+               << " prefix_length:" << prefix_length;
+    result = 0.0;
+  }
+  return result;
+}
+
+double TimePredictor::predict_decode_term(int32_t decode_request_num) {
+  if (general_coefficient_.size() <= 2) {
+    LOG(ERROR) << "general_coefficient size is less than 3 for decode term "
+                  "prediction. size="
+               << general_coefficient_.size();
+    return 0.0;
+  }
+
+  double result = general_coefficient_(2) * decode_request_num;
+  if (result < 0) {
+    LOG(ERROR) << "Negative decode term prediction: " << result
+               << ". Input param: decode_request_num:" << decode_request_num;
+    result = 0.0;
+  }
   return result;
 }
 

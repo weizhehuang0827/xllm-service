@@ -84,7 +84,7 @@ struct Request {
 
   int32_t ttlt_priority_weight = 0;
 
-  RequestPriority priority;
+  RequestPriority priority = RequestPriority::NORMAL;
 
   Urgency urgency = Urgency::NORMAL;
 

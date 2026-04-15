@@ -16,6 +16,7 @@ limitations under the License.
 #include "instance_mgr.h"
 
 #include <absl/strings/str_join.h>
+#include <absl/strings/str_split.h>
 #include <glog/logging.h>
 
 #include <chrono>
@@ -135,6 +136,122 @@ bool InstanceMgr::get_next_instance_pair(Routing* routing) {
   next_decode_index_ = next_decode_index_ % decode_index_.size();
   routing->decode_name = decode_index_[next_decode_index_];
   next_decode_index_++;
+  return true;
+}
+
+bool InstanceMgr::get_priority_disagg_instance_pair(Routing* routing,
+                                                    RequestPriority priority) {
+  std::unique_lock<std::shared_mutex> lock(inst_mutex_);
+  if (prefill_index_.empty()) {
+    LOG(ERROR) << "No prefill or default instance found!";
+    return false;
+  }
+
+  int32_t bucket = 1;
+  if (priority == RequestPriority::HIGH) {
+    bucket = 0;
+  } else if (priority == RequestPriority::LOW) {
+    bucket = 2;
+  }
+  auto parse_bucket_sizes = [](const std::string& conf,
+                               uint64_t total,
+                               uint64_t out[3]) -> bool {
+    if (conf.empty()) {
+      const uint64_t base = total / 3;
+      const uint64_t rem = total % 3;
+      out[0] = base + (rem > 0 ? 1 : 0);
+      out[1] = base + (rem > 1 ? 1 : 0);
+      out[2] = base;
+      return true;
+    }
+
+    std::vector<int32_t> parsed;
+    for (const auto& part : absl::StrSplit(conf, ',')) {
+      if (part.empty()) {
+        return false;
+      }
+      int32_t value = 0;
+      try {
+        value = std::stoi(std::string(part));
+      } catch (...) {
+        return false;
+      }
+      if (value < 0) {
+        return false;
+      }
+      parsed.push_back(value);
+    }
+
+    if (parsed.size() != 3) {
+      return false;
+    }
+    uint64_t sum = static_cast<uint64_t>(parsed[0]) +
+                   static_cast<uint64_t>(parsed[1]) +
+                   static_cast<uint64_t>(parsed[2]);
+    if (sum != total) {
+      return false;
+    }
+
+    out[0] = static_cast<uint64_t>(parsed[0]);
+    out[1] = static_cast<uint64_t>(parsed[1]);
+    out[2] = static_cast<uint64_t>(parsed[2]);
+    return true;
+  };
+
+  auto pick_from_bucket = [&](const std::vector<std::string>& instances,
+                              const std::string& bucket_conf,
+                              int32_t bucket_id,
+                              uint64_t* next_index,
+                              std::string* selected) -> bool {
+    if (instances.empty()) {
+      return false;
+    }
+
+    const uint64_t total = instances.size();
+    uint64_t bucket_sizes[3] = {0, 0, 0};
+    if (!parse_bucket_sizes(bucket_conf, total, bucket_sizes)) {
+      LOG(WARNING) << "Invalid priority_disagg bucket config: '" << bucket_conf
+                   << "', fallback to even split for total=" << total;
+      parse_bucket_sizes("", total, bucket_sizes);
+    }
+
+    const uint64_t start = (bucket_id == 0 ? 0 : (bucket_id == 1 ? bucket_sizes[0]
+                                                                  : bucket_sizes[0] + bucket_sizes[1]));
+    const uint64_t end = start + bucket_sizes[bucket_id];
+    if (start >= end) {
+      return false;
+    }
+
+    const uint64_t local_size = end - start;
+    *next_index = *next_index % local_size;
+    *selected = instances[start + *next_index];
+    (*next_index)++;
+    return true;
+  };
+
+  if (!pick_from_bucket(prefill_index_,
+                        options_.priority_disagg_prefill_bucket_sizes(),
+                        bucket,
+                        &next_prefill_priority_index_[bucket],
+                        &routing->prefill_name)) {
+    LOG(ERROR) << "No prefill/default instance found in priority bucket: "
+               << bucket;
+    return false;
+  }
+
+  if (decode_index_.empty()) {
+    routing->decode_name = "";
+    return true;
+  }
+
+  if (!pick_from_bucket(decode_index_,
+                        options_.priority_disagg_decode_bucket_sizes(),
+                        bucket,
+                        &next_decode_priority_index_[bucket],
+                        &routing->decode_name)) {
+    LOG(ERROR) << "No decode instance found in priority bucket: " << bucket;
+    return false;
+  }
   return true;
 }
 
@@ -438,15 +555,15 @@ std::unordered_map<std::string, absl::Time> InstanceMgr::get_prefill_instance_up
   return update_time_map_;
 }
 
-std::unordered_map<std::string, TtftPredictor> InstanceMgr::get_time_predictors() {
-  std::shared_lock<std::shared_mutex> lock(ttft_predictor_mutex_);
+std::unordered_map<std::string, TimePredictor> InstanceMgr::get_time_predictors() {
+  std::shared_lock<std::shared_mutex> lock(time_predictor_mutex_);
 
   return time_predictors_;
 }
 
 bool InstanceMgr::get_min_load_decode_instance(Routing* routing){
   std::shared_lock<std::shared_mutex> inst_lock(inst_mutex_);
-  std::lock_guard<std::mutex> metric_lock(request_metrics_mutex_);
+  std::shared_lock<std::shared_mutex> metric_lock(request_metrics_mutex_);
   std::string min_load_decode_instance = "";
   int32_t min_decode_request_num = std::numeric_limits<int32_t>::max();
   for (auto name : decode_index_) {
@@ -469,7 +586,7 @@ bool InstanceMgr::get_min_load_decode_instance(Routing* routing){
 
 bool InstanceMgr::get_min_load_prefill_instance(Routing* routing){
   std::shared_lock<std::shared_mutex> inst_lock(inst_mutex_);
-  std::lock_guard<std::mutex> metric_lock(request_metrics_mutex_);
+  std::shared_lock<std::shared_mutex> metric_lock(request_metrics_mutex_);
   std::string min_load_prefill_instance = "";
   int32_t min_prefill_token_num = std::numeric_limits<int32_t>::max();
   for (auto name : prefill_index_) {
@@ -490,21 +607,21 @@ bool InstanceMgr::get_min_load_prefill_instance(Routing* routing){
   return true;
 }
 
-double InstanceMgr::predict_step_time(std::shared_ptr<Request> request) {
-  std::shared_lock<std::shared_mutex> lock(ttft_predictor_mutex_);
+// double InstanceMgr::predict_step_time(std::shared_ptr<Request> request) {
+//   std::shared_lock<std::shared_mutex> lock(time_predictor_mutex_);
 
-  auto it = time_predictors_.find(request->routing.prefill_name);
-  if (it == time_predictors_.end()) {
-    LOG(ERROR) << "Failed to find instance ttft predictor, instance name : "
-               << request->routing.prefill_name;
-    return 0.0;
-  }
+//   auto it = time_predictors_.find(request->routing.prefill_name);
+//   if (it == time_predictors_.end()) {
+//     LOG(ERROR) << "Failed to find instance ttft predictor, instance name : "
+//                << request->routing.prefill_name;
+//     return 0.0;
+//   }
 
-  return it->second.predict_step_time(request->token_ids.size(), false);
-}
+//   return it->second.predict_step_time(request->token_ids.size(), false);
+// }
 
 double InstanceMgr::get_constant_overhead(std::string instance_name) {
-  std::shared_lock<std::shared_mutex> lock(ttft_predictor_mutex_);
+  std::shared_lock<std::shared_mutex> lock(time_predictor_mutex_);
 
   auto it = time_predictors_.find(instance_name);
   if (it == time_predictors_.end()) {
@@ -520,39 +637,41 @@ double InstanceMgr::get_constant_overhead(std::string instance_name) {
 void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
                                          RequestAction action) {
   // skip request metrics update if policy is not SLO_AWARE
-  if (options_.load_balance_policy() != "SLO_AWARE") {
+  if (options_.load_balance_policy() != "SLO_AWARE" &&
+      options_.load_balance_policy() != "gorouting" &&
+      options_.load_balance_policy() != "min_load") {
     return;
   }
-  if (action == RequestAction::FINISH_PREFILL){
-    int32_t total_request_num = total_request_num_.fetch_add(1, std::memory_order_relaxed);
-    if (request->can_satisfy_slo) {
-      satisfied_slo_request_num_.fetch_add(1, std::memory_order_relaxed);
-      request->set_elapsed_time_ms();
-      if (request->get_elapsed_time_ms() < request->get_deadline_ms()) {
-       actual_satisfied_slo_request_num_.fetch_add(1, std::memory_order_relaxed);
-      }
-    }
-    if (total_request_num  == 500){
-      double slo_satisfaction_rate = 0.0;
-      int32_t satisfied_slo_request_num = satisfied_slo_request_num_.load(std::memory_order_relaxed);
-      int32_t actual_satisfied_slo_request_num = actual_satisfied_slo_request_num_.load(std::memory_order_relaxed);
-      slo_satisfaction_rate = static_cast<double>(satisfied_slo_request_num)/ static_cast<double>(total_request_num);
-      // size_t prev_satisfied_slo_request_num = prev_satisfied_slo_request_num_.load(std::memory_order_relaxed);
-      // size_t prev_actual_satisfied_slo_request_num = prev_actual_satisfied_slo_request_num_.load(std::memory_order_relaxed);
-      LOG(INFO) << "Predicted SLO Satisfaction num in last 500 requests: " << satisfied_slo_request_num;
-      LOG(INFO) << "Actual SLO Satisfaction num in Predicted SLO Satisfaction num: " << actual_satisfied_slo_request_num;
-      // satisfied_slo_request_num_.store(0, std::memory_order_relaxed);
-      // actual_satisfied_slo_request_num_.store(0, std::memory_order_relaxed);
-      total_request_num_.store(0, std::memory_order_relaxed);
-      // prev_satisfied_slo_request_num_.store(satisfied_slo_request_num, std::memory_order_relaxed);
-      // prev_actual_satisfied_slo_request_num_.store(actual_satisfied_slo_request_num, std::memory_order_relaxed);
-    }
+  // if (action == RequestAction::FINISH_PREFILL){
+  //   int32_t total_request_num = total_request_num_.fetch_add(1, std::memory_order_relaxed);
+  //   if (request->can_satisfy_slo) {
+  //     satisfied_slo_request_num_.fetch_add(1, std::memory_order_relaxed);
+  //     request->set_elapsed_time_ms();
+  //     if (request->get_elapsed_time_ms() < request->get_deadline_ms()) {
+  //      actual_satisfied_slo_request_num_.fetch_add(1, std::memory_order_relaxed);
+  //     }
+  //   }
+  //   if (total_request_num  == 500){
+  //     double slo_satisfaction_rate = 0.0;
+  //     int32_t satisfied_slo_request_num = satisfied_slo_request_num_.load(std::memory_order_relaxed);
+  //     int32_t actual_satisfied_slo_request_num = actual_satisfied_slo_request_num_.load(std::memory_order_relaxed);
+  //     slo_satisfaction_rate = static_cast<double>(satisfied_slo_request_num)/ static_cast<double>(total_request_num);
+  //     // size_t prev_satisfied_slo_request_num = prev_satisfied_slo_request_num_.load(std::memory_order_relaxed);
+  //     // size_t prev_actual_satisfied_slo_request_num = prev_actual_satisfied_slo_request_num_.load(std::memory_order_relaxed);
+  //     LOG(INFO) << "Predicted SLO Satisfaction num in last 500 requests: " << satisfied_slo_request_num;
+  //     LOG(INFO) << "Actual SLO Satisfaction num in Predicted SLO Satisfaction num: " << actual_satisfied_slo_request_num;
+  //     // satisfied_slo_request_num_.store(0, std::memory_order_relaxed);
+  //     // actual_satisfied_slo_request_num_.store(0, std::memory_order_relaxed);
+  //     total_request_num_.store(0, std::memory_order_relaxed);
+  //     // prev_satisfied_slo_request_num_.store(satisfied_slo_request_num, std::memory_order_relaxed);
+  //     // prev_actual_satisfied_slo_request_num_.store(actual_satisfied_slo_request_num, std::memory_order_relaxed);
+  //   }
     
     
-  }
+  // }
   
 
-  std::lock_guard<std::mutex> lock(request_metrics_mutex_);
+  std::unique_lock<std::shared_mutex> lock(request_metrics_mutex_);
   std::unique_lock<std::shared_mutex> map_lock(update_map_mutex_);
 
 
@@ -571,12 +690,8 @@ void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
     return;
   }
 
-  auto prefill_running_requests_it = running_requests_map_.find(request->routing.prefill_name);
-  if (prefill_running_requests_it == running_requests_map_.end()) {
-    LOG(ERROR) << "Failed to find instance running requests, instance name : "
-               << request->routing.prefill_name;
-    return;
-  }
+  auto prefill_running_requests_it =
+      running_requests_map_.find(request->routing.prefill_name);
   auto decode_request_num_it = decode_request_num_map_.find(request->routing.prefill_name);
   if (decode_request_num_it == decode_request_num_map_.end()) {
     LOG(ERROR) << "Failed to find instance decode running requests, instance name : "
@@ -601,14 +716,17 @@ void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
 
       if (!decode_index_.empty()) { // not PD
         decode_it->second.decode_request_num += 1;
-        decode_it->second.decode_token_num += token_length;
+        decode_it->second.decode_token_num += num_prompt_tokens;
       }
       
 
-      if (prefill_running_requests_it->second.empty()){
-        prefill_update_time_it->second = absl::Now();
+      if (prefill_running_requests_it != running_requests_map_.end()) {
+        if (prefill_running_requests_it->second.empty()) {
+          prefill_update_time_it->second = absl::Now();
+        }
+        prefill_running_requests_it->second.emplace(request->service_request_id,
+                                                    request);
       }
-      prefill_running_requests_it->second.emplace(request->service_request_id,request);
       
       break;
     case RequestAction::FINISH_PREFILL:
@@ -620,16 +738,22 @@ void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
       prefill_it->second.prefill_token_num -= num_prompt_tokens;
       prefill_it->second.estimated_prefill_time -= request->estimated_ttft;
 
-      prefill_running_requests_it->second.erase(request->service_request_id);
-      prefill_update_time_it->second = absl::Now();
+      if (prefill_running_requests_it != running_requests_map_.end()) {
+        prefill_running_requests_it->second.erase(request->service_request_id);
+        prefill_update_time_it->second = absl::Now();
+      }
 
-      decode_it->second.decode_token_num += 1;
+      if (!decode_index_.empty()) {
+        decode_it->second.decode_token_num += 1;
+      }
       break;
-    case RequestAction::GENERATE:
-      // update the request metrics for decode instance when request generate a
-      // token
-      decode_it->second.decode_token_num += 1;
-      break;
+    // case RequestAction::GENERATE:
+    //   // update the request metrics for decode instance when request generate a
+    //   // token
+    //   if (!decode_index_.empty()) {
+    //     decode_it->second.decode_token_num += 1;
+    //   }
+    //   break;
     case RequestAction::FINISH_DECODE:
       // update the request metrics for decode instance when request finishes
       // the decode phase
@@ -656,7 +780,9 @@ void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
       decode_request_num_it->second -= 1;
       
 
-      prefill_running_requests_it->second.erase(request->service_request_id);
+      if (prefill_running_requests_it != running_requests_map_.end()) {
+        prefill_running_requests_it->second.erase(request->service_request_id);
+      }
       // decode_running_requests_it->second.erase(request->service_request_id);
       break;
     default:
@@ -664,7 +790,7 @@ void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
       break;
   }
 
-  if (decode_it->second.decode_request_num == 0) {
+  if (!decode_index_.empty() && decode_it->second.decode_request_num == 0) {
     std::unique_lock<std::shared_mutex> instance_lock(inst_mutex_);
     flip_decode_to_prefill(request->routing.decode_name);
   }
@@ -673,7 +799,8 @@ void InstanceMgr::update_request_metrics(std::shared_ptr<Request> request,
 bool InstanceMgr::select_instance_pair_on_slo(
     std::shared_ptr<Request> request) {
   std::unique_lock<std::shared_mutex> lock(inst_mutex_);
-  std::lock_guard<std::mutex> request_metrics_lock(request_metrics_mutex_);
+  std::unique_lock<std::shared_mutex> request_metrics_lock(
+      request_metrics_mutex_);
 
   if (prefill_index_.empty()) {
     LOG(ERROR) << "No prefill or default instance found!";
@@ -817,7 +944,7 @@ void InstanceMgr::flip_decode_to_prefill(std::string& instance_name) {
 
 TimePredictor& InstanceMgr::get_time_predictor(
     const std::string& instance_name) {
-  std::lock_guard<std::mutex> lock(time_predictor_mutex_);
+  std::shared_lock<std::shared_mutex> lock(time_predictor_mutex_);
 
   auto it = time_predictors_.find(instance_name);
   if (it == time_predictors_.end()) {
@@ -946,22 +1073,44 @@ void InstanceMgr::deregister_instance(const std::string& name) {
 
 void InstanceMgr::add_instance_resources(const std::string& name,
                                          const InstanceMetaInfo& info) {
-  std::lock_guard<std::mutex> time_predictor_lock(time_predictor_mutex_);
-  std::lock_guard<std::mutex> request_metrics_lock(request_metrics_mutex_);
+  std::unique_lock<std::shared_mutex> time_predictor_lock(
+      time_predictor_mutex_);
+  std::unique_lock<std::shared_mutex> request_metrics_lock(
+      request_metrics_mutex_);
+  std::unique_lock<std::shared_mutex> update_map_lock(update_map_mutex_);
 
   time_predictors_.insert_or_assign(
-      name, TimePredictor(info.ttft_profiling_data, info.tpot_profiling_data));
+      name,
+      TimePredictor(info.ttft_profiling_data,
+                    info.tpot_profiling_data,
+                    info.coefficients));
 
   request_metrics_.insert_or_assign(name, RequestMetrics());
+  decode_request_num_map_.insert_or_assign(name, 0);
+  update_time_map_.insert_or_assign(name, absl::Now());
+  if (info.type == InstanceType::PREFILL ||
+      info.type == InstanceType::DEFAULT) {
+    running_requests_map_.insert_or_assign(
+        name,
+        std::unordered_map<std::string, std::shared_ptr<Request>>{});
+  } else {
+    running_requests_map_.erase(name);
+  }
 }
 
 void InstanceMgr::remove_instance_resources(const std::string& name) {
   cached_channels_.erase(name);
   {
-    std::lock_guard<std::mutex> time_predictor_lock(time_predictor_mutex_);
-    std::lock_guard<std::mutex> request_metrics_lock(request_metrics_mutex_);
+    std::unique_lock<std::shared_mutex> time_predictor_lock(
+        time_predictor_mutex_);
+    std::unique_lock<std::shared_mutex> request_metrics_lock(
+        request_metrics_mutex_);
+    std::unique_lock<std::shared_mutex> update_map_lock(update_map_mutex_);
     time_predictors_.erase(name);
     request_metrics_.erase(name);
+    decode_request_num_map_.erase(name);
+    update_time_map_.erase(name);
+    running_requests_map_.erase(name);
   }
   {
     std::lock_guard<std::mutex> lock(update_mutex_);

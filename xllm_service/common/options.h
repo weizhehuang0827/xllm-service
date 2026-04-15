@@ -80,6 +80,8 @@ class Options {
   PROPERTY(int32_t, max_global_ttft_ms) = 2000;
 
   PROPERTY(std::string, priority_strategy) = "fcfs";
+  PROPERTY(std::string, priority_disagg_prefill_bucket_sizes) = "";
+  PROPERTY(std::string, priority_disagg_decode_bucket_sizes) = "";
 
 };
 

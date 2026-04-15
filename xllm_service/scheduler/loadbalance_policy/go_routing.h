@@ -27,21 +27,31 @@ limitations under the License.
 
 namespace xllm_service {
 
-class PriorityRouting final : public LoadBalancePolicy {
-  using RunningRequestMap = std::unordered_map<std::string, std::vector<std::shared_ptr<Request>>>;
+class GoRouting final : public LoadBalancePolicy {
+  using RunningRequestMap =
+      std::unordered_map<std::string, std::vector<std::shared_ptr<Request>>>;
  public:
-  PriorityRouting(std::shared_ptr<InstanceMgr> instance_mgr, const Options& options)
+  GoRouting(std::shared_ptr<InstanceMgr> instance_mgr, const Options& options)
       : LoadBalancePolicy(instance_mgr, options) {
         if_pd_disagg_ = FLAGS_if_pd_disagg;
       }
 
-  virtual ~PriorityRouting() = default;
+  virtual ~GoRouting() = default;
 
-  double get_latency_budget_and_request_order(TtftPredictor& ttft_predictor, std::vector<std::shared_ptr<Request>>& running_queue);
+  double get_latency_budget_and_request_order(
+      TimePredictor& ttft_predictor,
+      std::vector<std::shared_ptr<Request>>& running_queue);
 
   double get_raw_total_exec_time(std::vector<std::shared_ptr<Request>>& running_queue);
 
-  std::string get_max_gain_instance(std::unordered_map<std::string, int32_t>& decode_request_num_map, std::unordered_map<std::string, absl::Time>& update_time_map, std::unordered_map<std::string, TtftPredictor>& ttft_predictors, RunningRequestMap& prefill_running_requests_map, std::unordered_map<std::string,std::string>& strategies, std::unordered_map<std::string,double>& budgets, std::shared_ptr<Request> request);
+  std::string get_max_gain_instance(
+      std::unordered_map<std::string, int32_t>& decode_request_num_map,
+      std::unordered_map<std::string, absl::Time>& update_time_map,
+      std::unordered_map<std::string, TimePredictor>& time_predictors,
+      RunningRequestMap& prefill_running_requests_map,
+      std::unordered_map<std::string, std::string>& strategies,
+      std::unordered_map<std::string, double>& budgets,
+      std::shared_ptr<Request> request);
 
   bool select_instances_pair(std::shared_ptr<Request> request) override;
 
@@ -50,9 +60,9 @@ class PriorityRouting final : public LoadBalancePolicy {
   double get_estimate_exec_time(bool is_pre, double executed_time, double exec_time, double constant_overhead, int32_t num_sequences, double latency_budget);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PriorityRouting);
+  DISALLOW_COPY_AND_ASSIGN(GoRouting);
 
-  std::unordered_map<std::string, TtftPredictor> ttft_predictors_;
+  std::unordered_map<std::string, TimePredictor> ttft_predictors_;
 
   std::atomic<size_t> num_warmup_request_num_{0};
 

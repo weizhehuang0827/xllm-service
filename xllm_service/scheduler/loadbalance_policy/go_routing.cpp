@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "priority_routing.h"
+#include "go_routing.h"
 #include <algorithm>
 #include <vector>
 #include <cmath>
@@ -24,7 +24,7 @@ limitations under the License.
 
 namespace xllm_service {
 
-double PriorityRouting::get_latency_budget_and_request_order(TimePredictor& ttft_predictor, std::vector<std::shared_ptr<Request>>& running_queue){
+double GoRouting::get_latency_budget_and_request_order(TimePredictor& ttft_predictor, std::vector<std::shared_ptr<Request>>& running_queue){
   
   double latency_budget = 0;
   for (auto& request : running_queue){
@@ -97,7 +97,7 @@ double PriorityRouting::get_latency_budget_and_request_order(TimePredictor& ttft
   return latency_budget;
 }
 
-double PriorityRouting::get_raw_total_exec_time(std::vector<std::shared_ptr<Request>>& running_queue){
+double GoRouting::get_raw_total_exec_time(std::vector<std::shared_ptr<Request>>& running_queue){
   double exec_queue_time = 0;
   for (int32_t i = 0 ; i<running_queue.size(); i++){
     exec_queue_time += running_queue[i]->get_estimated_latency();
@@ -106,7 +106,7 @@ double PriorityRouting::get_raw_total_exec_time(std::vector<std::shared_ptr<Requ
   return exec_queue_time;
 }
 
-double PriorityRouting::get_estimate_exec_time(bool is_pre, double executed_time, double exec_time, double constant_overhead, int32_t num_sequences, double latency_budget){
+double GoRouting::get_estimate_exec_time(bool is_pre, double executed_time, double exec_time, double constant_overhead, int32_t num_sequences, double latency_budget){
   // 假设撑满整个ttft slo
   // double result = exec_time + ceil(exec_time / (ttft_slo - constant_overhead)) * constant_overhead;
   // double result = exec_time + ceil(exec_time / (latency_budget - constant_overhead)) * constant_overhead;
@@ -120,8 +120,8 @@ double PriorityRouting::get_estimate_exec_time(bool is_pre, double executed_time
       }
       // no constrain seq
       else {
-        // result = exec_time + constant_overhead;
-        result = is_pre? (exec_time + constant_overhead) : (exec_time + constant_overhead*num_sequences);
+        result = exec_time + constant_overhead;
+        // result = is_pre? (exec_time + constant_overhead) : (exec_time + constant_overhead*num_sequences);
       }
 
     }
@@ -143,12 +143,15 @@ double PriorityRouting::get_estimate_exec_time(bool is_pre, double executed_time
     
   }
   result -= executed_time;
+  if (result < 0){
+    result = constant_overhead;
+  }
   // LOG(INFO) << "exec_time: " << exec_time << ", ttft_slo: " << ttft_slo << ", constant_overhead: " << constant_overhead << ", result: " << result;
   return result;
 }
 
 
-int32_t PriorityRouting::get_gain_for_running_queue(bool is_pre, std::vector<std::shared_ptr<Request>>& running_queue, double latency_budget, double constant_overhead, double executed_time, double total_exec_time){
+int32_t GoRouting::get_gain_for_running_queue(bool is_pre, std::vector<std::shared_ptr<Request>>& running_queue, double latency_budget, double constant_overhead, double executed_time, double total_exec_time){
   int32_t gain = 0;
   double alpha = 0.9;
   if (if_pd_disagg_){
@@ -186,7 +189,7 @@ int32_t PriorityRouting::get_gain_for_running_queue(bool is_pre, std::vector<std
   }
   else {
     // pd mixed
-    // use total time
+    // use total time, no constrain seq
     for (int32_t i = 0 ; i<running_queue.size(); i++){
       auto request = running_queue[i];
       if (alpha*request->get_remaining_time() > total_exec_time){
@@ -223,9 +226,9 @@ int32_t PriorityRouting::get_gain_for_running_queue(bool is_pre, std::vector<std
 }
 
 
-std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::string, int32_t>& decode_request_num_map, std::unordered_map<std::string, absl::Time>& update_time_map, std::unordered_map<std::string, TimePredictor>& time_predictors, RunningRequestMap& prefill_running_requests_map,std::unordered_map<std::string,std::string>& strategies,std::unordered_map<std::string,double>& budgets, std::shared_ptr<Request> request){
+std::string GoRouting::get_max_gain_instance(std::unordered_map<std::string, int32_t>& decode_request_num_map, std::unordered_map<std::string, absl::Time>& update_time_map, std::unordered_map<std::string, TimePredictor>& time_predictors, RunningRequestMap& prefill_running_requests_map,std::unordered_map<std::string,std::string>& strategies,std::unordered_map<std::string,double>& budgets, std::shared_ptr<Request> request){
   double up_ratio = 0.8;
-  double low_ratio = 0.2;
+  double low_ratio = 0.1;
   int32_t ttft_slo = request->get_ttft_slo_ms();
   double max_delta_gain = std::numeric_limits<double>::lowest();
   std::string max_gain_instance = "";
@@ -269,20 +272,24 @@ std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::strin
 
     auto& ttft_predictor = it->second;
     auto& running_queue = pair.second;
+
     double executed_time =0.0;
-    if (running_queue.size() >0) {
-      executed_time = absl::ToDoubleSeconds(absl::Now() - time_it->second) * 1000; // ms
-    }
+    // if (running_queue.size() > 0) {
+    //   executed_time = absl::ToDoubleSeconds(absl::Now() - time_it->second) * 1000; // ms
+    // }
+
     int32_t decode_request_num = decode_num_it->second;
     double constant_overhead = ttft_predictor.get_constant_overhead();
     if (!if_pd_disagg_){
-      constant_overhead += ttft_predictor.predict_tpot(0, decode_request_num, false); // only for disagg_
+      constant_overhead +=
+          ttft_predictor.predict_step_time(0, decode_request_num, false); // only for non-disagg_
     }
 
     instances_name.push_back(pair.first);
 
     // 计算当前这个request的指标
-    request->set_estimated_latency(ttft_predictor.predict_ttft(request->token_ids.size(), false));
+    request->set_estimated_latency(
+        ttft_predictor.predict_step_time(request->token_ids.size(), 0, false));
     request->set_elapsed_time_ms();
     // if (request->get_remaining_time()< total_exec_time*latency_budget / (latency_budget - constant_overhead)){
     //   request->set_urgency(Urgency::URGENT); //下一个回合就超时的，所以尽量这回合就加进去
@@ -411,12 +418,12 @@ std::string PriorityRouting::get_max_gain_instance(std::unordered_map<std::strin
 
 }
 
-bool PriorityRouting::select_instances_pair(std::shared_ptr<Request> request) {
+bool GoRouting::select_instances_pair(std::shared_ptr<Request> request) {
   // for warm up
-  size_t prev_count = num_warmup_request_num_.fetch_add(1, std::memory_order_relaxed);
-  if  (prev_count < 500) {
-    return instance_mgr_->get_next_instance_pair(&request->routing);
-  }
+  // size_t prev_count = num_warmup_request_num_.fetch_add(1, std::memory_order_relaxed);
+  // if  (prev_count < 500) {
+  //   return instance_mgr_->get_next_instance_pair(&request->routing);
+  // }
 
   std::lock_guard<std::mutex> metric_lock(request_metrics_mutex_);
   
